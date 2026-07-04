@@ -6,3 +6,7 @@ a.out
 a.out-*
 *-32*
 *-64*
+
+# clangd / Bear local tooling artifacts (regenerate via ./gen-compdb.sh)
+/compile_commands.json
+!.clangd

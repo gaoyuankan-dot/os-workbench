@@ -20,10 +20,17 @@
 
 static SDL_Window *window = NULL;
 static SDL_Surface *surface = NULL;
+// toolchain-compat: `surface` is written by __am_gpu_fbdraw (main thread) and
+// read by texture_sync (SDL timer thread) with no synchronization.
+// The unsynchronized concurrent blits corrupt SDL blit state and SIGSEGV within ~1s of launch
+// (a Heisenbug that vanishes under gdb, here, we need coredump). Serialize the two blits with a mutex.
+static SDL_mutex *fb_lock = NULL;
 
 static Uint32 texture_sync(Uint32 interval, void *param) {
+  SDL_LockMutex(fb_lock);
   SDL_BlitScaled(surface, NULL, SDL_GetWindowSurface(window), NULL);
   SDL_UpdateWindowSurface(window);
+  SDL_UnlockMutex(fb_lock);
   return interval;
 }
 
@@ -39,6 +46,7 @@ void __am_gpu_init() {
       SDL_WINDOW_SHOWN);
   surface = SDL_CreateRGBSurface(SDL_SWSURFACE, W, H, 32,
       RMASK, GMASK, BMASK, AMASK);
+  fb_lock = SDL_CreateMutex();
   SDL_AddTimer(1000 / FPS, texture_sync, NULL);
 }
 
@@ -61,6 +69,8 @@ void __am_gpu_fbdraw(AM_GPU_FBDRAW_T *ctl) {
   SDL_Surface *s = SDL_CreateRGBSurfaceFrom(ctl->pixels, w, h, 32, w * sizeof(uint32_t),
       RMASK, GMASK, BMASK, AMASK);
   SDL_Rect rect = { .x = x, .y = y };
+  SDL_LockMutex(fb_lock);
   SDL_BlitSurface(s, NULL, surface, &rect);
+  SDL_UnlockMutex(fb_lock);
   SDL_FreeSurface(s);
 }

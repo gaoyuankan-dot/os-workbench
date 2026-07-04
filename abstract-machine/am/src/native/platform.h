@@ -20,7 +20,10 @@ typedef struct {
   uintptr_t ksp;
   int cpuid;
   Event ev; // similar to cause register in mips/riscv
-  uint8_t sigstack[SIGSTKSZ];
+  // SIGSTKSZ is no longer a compile-time constant since glibc >= 2.34 (it
+  // became a runtime expression, which is illegal for a file-scope array);
+  // use the historical value for the per-CPU signal stack.
+  uint8_t sigstack[8192];
 } __am_cpu_t;
 extern __am_cpu_t *__am_cpu_struct;
 #define thiscpu __am_cpu_struct
