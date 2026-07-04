@@ -1,26 +1,27 @@
 #include <game.h>
 
-// L0: a minimal single-player Pong running on AbstractMachine (TRM + IOE only).
+// L0: a minimal game running on AbstractMachine (TRM + IOE only).
 //
 // Portability notes (the "two word lengths" requirement):
+//   * different stack layout and args pass to 32/64 bit
 //   * integer-only physics -- no float/double (forbidden on non-native via -mno-sse)
 //   * screen size is queried at runtime, never hardcoded (the OJ changes resolution)
 //   * no pointer<->int casts that assume sizeof(int)==sizeof(void*)
 
-#define FPS          60
+#define FPS          90
 #define FRAME_US     (1000000 / FPS)   // microseconds per frame
 #define BALL_SIDE    10
+#define BALL_SPEED   300               // pixels per second
 #define PADDLE_W     80
 #define PADDLE_H     12
 #define PADDLE_STEP  24                 // pixels moved per left/right key press
-#define BALL_SPEED   300               // pixels per second
 #define LIVES        3
 
 // colors are 0x00RRGGBB
 #define COL_BG     0x00000000
-#define COL_BALL   0x00ffffff
-#define COL_PADDLE 0x0000ff00
-#define COL_OVER   0x00ff0000
+#define COL_BALL   0x00ffffff           // WHITE
+#define COL_PADDLE 0x0000ff00           // GREEN
+#define COL_OVER   0x00ff0000           // RED
 
 static int W, H;                  // screen size, queried at runtime
 static int pad_x, pad_y;          // paddle position
@@ -43,11 +44,17 @@ static void clear_screen(void) {
       draw_rect(x, y, 32, 32, COL_BG);
 }
 
+// Re-center the ball and paddle after a life loss (or a fresh start).
+// (bx, by) is the ball's TOP-LEFT corner -- that's what draw_rect and the
+// bounce math use -- so to put the ball's *center* at screen center we must
+// subtract BALL_SIDE/2.  (Previously this used W/2, H/2, which leaves the
+// ball off-center in the lower-right quadrant and biases the first bounce.)
 static void reset_ball(void) {
-  bx = W / 2; by = H / 2;
+  bx = W / 2 - BALL_SIDE / 2;
+  by = H / 2 - BALL_SIDE / 2;
   bvx = BALL_SPEED * 2 / 3;       // a slight angle
   bvy = BALL_SPEED;               // initially moving down
-  pad_x = W / 2 - PADDLE_W / 2;
+  pad_x = W / 2 - PADDLE_W / 2;   // paddle also re-centered horizontally
 }
 
 static void draw_scene(void) {
@@ -56,13 +63,26 @@ static void draw_scene(void) {
   draw_rect(bx, by, BALL_SIDE, BALL_SIDE, game_over ? COL_OVER : COL_BALL);
 }
 
+// Handle one keyboard event.
+//
+// Q5 / keyboard note: events come from io_read(AM_INPUT_KEYBRD), which polls
+// the i8042 controller (port 0x60) -- NOT interrupt-driven -- so we must
+// call it every frame (see main loop). With the toolchain-compat fix in
+// am/src/x86/qemu/ioe.c, the Set-1 arrow scancodes are mapped to
+// AM_KEY_LEFT/RIGHT/UP/DOWN. If NO key at all reaches here, the usual cause
+// is that the QEMU SDL window lacks keyboard focus -- click inside it first.
+//
+// ESC is the ONLY place we ever call halt(); every other exit path (life
+// loss, game over) just keeps running -- an assert firing would also halt
+// and that counts as Wrong Answer on the OJ.
 static void kbd_event(AM_INPUT_KEYBRD_T ev) {
-  if (!ev.keydown) return;
+  if (!ev.keydown) return;                       // ignore key-release events
   if (ev.keycode == AM_KEY_ESCAPE) halt(0);     // ESC -> exit, the only allowed halt
   if (game_over) { game_over = 0; lives = LIVES; reset_ball(); return; }
-  if (ev.keycode == AM_KEY_LEFT)  pad_x -= PADDLE_STEP;
-  if (ev.keycode == AM_KEY_RIGHT) pad_x += PADDLE_STEP;
-  if (pad_x < 0) pad_x = 0;
+  // (the puts() below is a debug trace -- delete it once input is confirmed)
+  if (ev.keycode == AM_KEY_LEFT)  { puts("Get LEFT\n");  pad_x -= PADDLE_STEP; }
+  if (ev.keycode == AM_KEY_RIGHT) { puts("Get RIGHT\n"); pad_x += PADDLE_STEP; }
+  if (pad_x < 0) pad_x = 0;                      // clamp paddle to the screen
   if (pad_x > W - PADDLE_W) pad_x = W - PADDLE_W;
 }
 
@@ -88,14 +108,28 @@ static void physics_step(void) {
   }
 }
 
+// AM's entry point is main(const char *args), NOT standard main(int, char**).
+// ioe_init() MUST be the first IOE call (it sets up the device table) -- doing
+// any io_read/ioe_read before it is undefined.
 int main(const char *args) {
   (void)args;
   ioe_init();
 
+  // Q1: query the screen size at runtime. On x86_64-qemu the bootblock sets a
+  // VBE mode (640x480x32 by default -- see am/src/x86/qemu/boot/start.S) and
+  // gpu_init() reads the VBE info; the OJ relinks with a different mode, so
+  // cfg.width/height differ at runtime. NEVER hardcode W/H. Test portability
+  // locally by running two real resolutions: `make ARCH=x86_64-qemu run`
+  // (640x480) and `make ARCH=native run` (400x300 SDL window).
   AM_GPU_CONFIG_T cfg = {0};
   ioe_read(AM_GPU_CONFIG, &cfg);
   W = cfg.width;
   H = cfg.height;
+
+  // Q2: pad_y is set ONCE here because the paddle only moves horizontally --
+  // its Y never changes. pad_x, by contrast, is re-centered on every life
+  // loss, so it lives in reset_ball() with the rest of the per-life state.
+  // (8px bottom margin keeps the paddle off the very edge of the screen.)
   pad_y = H - PADDLE_H - 8;
 
   lives = LIVES;
@@ -104,15 +138,21 @@ int main(const char *args) {
 
   puts("L0 Pong. ESC=quit, <-/-> move paddle.\n");
 
-  uint64_t next_frame = io_read(AM_TIMER_UPTIME).us;
+  // Q4: io_read(reg) is just a macro over ioe_read(reg, &local) that returns
+  // the struct (see klib-macros.h) -- the two are the same mechanism. Use
+  // io_read for a quick one-shot read (timer, keyboard), ioe_read when you
+  // want the struct as a named local you keep (the GPU cfg above). Mixing
+  // them is idiomatic, not a bad smell.
+  uint64_t next_frame = io_read(AM_TIMER_UPTIME).us;   // frame timing in microseconds
   while (1) {
-    while (io_read(AM_TIMER_UPTIME).us < next_frame) ;     // wait for the frame
+    while (io_read(AM_TIMER_UPTIME).us < next_frame) ; // spin until next frame
     AM_INPUT_KEYBRD_T ev;
+    // drain ALL queued key events this frame; AM_KEY_NONE means "buffer empty"
     while ((ev = io_read(AM_INPUT_KEYBRD)).keycode != AM_KEY_NONE)
       kbd_event(ev);
     physics_step();
     draw_scene();
-    next_frame += FRAME_US;
+    next_frame += FRAME_US;     // 1/FPS seconds, in us
   }
   return 0;   // unreachable; the game exits via halt(0) on ESC
 }
