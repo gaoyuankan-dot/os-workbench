@@ -102,6 +102,9 @@ static void timer_uptime(AM_TIMER_UPTIME_T *upt) {
 // Input
 // ====================================================
 
+// Arrow keys send 0xE0 then 0x48/0x4b/0x4d/0x50 (scancode set 1). The 0xE0
+// prefix maps to AM_KEY_NONE, so the second byte decides: map it to the
+// arrows (upstream had INSERT/HOME/END/DELETE here, so arrows never worked).
 static int keylut[128] = {
   [0x01] = AM_KEY_ESCAPE,               [0x02] = AM_KEY_1, [0x03] = AM_KEY_2,
   [0x04] = AM_KEY_3, [0x05] = AM_KEY_4, [0x06] = AM_KEY_5, [0x07] = AM_KEY_6,
@@ -125,8 +128,8 @@ static int keylut[128] = {
   [0x3b] = AM_KEY_F1,    [0x3c] = AM_KEY_F2,     [0x3d] = AM_KEY_F3,
   [0x3e] = AM_KEY_F4,    [0x3f] = AM_KEY_F5,     [0x40] = AM_KEY_F6,
   [0x41] = AM_KEY_F7,    [0x42] = AM_KEY_F8,     [0x43] = AM_KEY_F9,
-  [0x44] = AM_KEY_F10,   [0x48] = AM_KEY_INSERT,
-  [0x4b] = AM_KEY_HOME,  [0x4d] = AM_KEY_END,    [0x50] = AM_KEY_DELETE,
+  [0x44] = AM_KEY_F10,   [0x48] = AM_KEY_UP,
+  [0x4b] = AM_KEY_LEFT,  [0x4d] = AM_KEY_RIGHT,  [0x50] = AM_KEY_DOWN,
   [0x57] = AM_KEY_F11,   [0x58] = AM_KEY_F12,    [0x5b] = AM_KEY_APPLICATION,
 };
 
@@ -426,7 +429,9 @@ void __am_lapic_eoi(void) {
 
 void __am_lapic_bootap(uint32_t apicid, void *addr) {
   int i;
-  uint16_t *wrv;
+  // volatile pointer: GCC >= 12 assumes addresses below 4 KiB come from NULL and
+  // rejects the fixed BIOS address 0x467 under -Werror=array-bounds.
+  uint16_t * volatile wrv;
   outb(0x70, 0xF);
   outb(0x71, 0x0A);
   wrv = (unsigned short*)((0x40<<4 | 0x67));
