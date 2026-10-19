@@ -91,13 +91,16 @@ void map(AddrSpace *as, void *va, void *pa, int prot) {
   VMHead *vm_head = as->ptr;
   assert(vm_head != NULL);
   char buf[32];
-  snprintf(buf, 32, "%x", va);
+  // Hash key = the page's address as hex. It used to be "%x", which reads only
+  // 32 bits of a 64-bit pointer, so two pages differing only in their upper
+  // half shared one key. Both snprintf calls below must use the same format.
+  snprintf(buf, 32, "%lx", (unsigned long)(uintptr_t)va);
   ENTRY item = { .key = buf };
   ENTRY *item_find;
   hsearch_r(item, FIND, &item_find, &vm_head->hash);
   if (item_find == NULL) {
     pp = pgalloc(__am_pgsize); // this will waste memory, any better idea?
-    snprintf(pp->key, 32, "%x", va);
+    snprintf(pp->key, 32, "%lx", (unsigned long)(uintptr_t)va);  // same format as buf
     item.key = pp->key;
     item.data = pp;
     int ret = hsearch_r(item, ENTER, &item_find, &vm_head->hash);

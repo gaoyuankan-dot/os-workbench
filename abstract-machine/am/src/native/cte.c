@@ -21,8 +21,11 @@ static void irq_handle(Context *c) {
 
   if (thiscpu->ev.event == EVENT_ERROR) {
     uintptr_t rip = c->uc.uc_mcontext.gregs[REG_RIP];
-    printf("Unhandle signal '%s' at rip = %p, badaddr = %p, cause = 0x%x\n",
-        thiscpu->ev.msg, rip, thiscpu->ev.ref, thiscpu->ev.cause);
+    // Cast each argument to the exact type its conversion reads: %p wants a
+    // void *, and cause is a 64-bit uintptr_t, which %x would cut to 32 bits.
+    printf("Unhandle signal '%s' at rip = %p, badaddr = %p, cause = 0x%lx\n",
+        thiscpu->ev.msg, (void *)rip, (void *)thiscpu->ev.ref,
+        (unsigned long)thiscpu->ev.cause);
     assert(0);
   }
   c = user_handler(thiscpu->ev, c);
