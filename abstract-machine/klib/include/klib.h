@@ -32,11 +32,16 @@ int    abs       (int x);
 int    atoi      (const char *nptr);
 
 // stdio.h
-int    printf    (const char *format, ...);
-int    sprintf   (char *str, const char *format, ...);
-int    snprintf  (char *str, size_t size, const char *format, ...);
-int    vsprintf  (char *str, const char *format, va_list ap);
-int    vsnprintf (char *str, size_t size, const char *format, va_list ap);
+// AM builds with -fno-builtin, so GCC no longer knows these are printf-like.
+// The format attribute brings back -Wformat checking of the arguments
+// (args are checked from the index after the format; 0 = a va_list).
+// Spelled __printf__ (like glibc's headers) so a macro named printf can't break it.
+#define KLIB_PRINTF(fmt_idx, args_idx) __attribute__((format(__printf__, fmt_idx, args_idx)))
+int    printf    (const char *format, ...) KLIB_PRINTF(1, 2);
+int    sprintf   (char *str, const char *format, ...) KLIB_PRINTF(2, 3);
+int    snprintf  (char *str, size_t size, const char *format, ...) KLIB_PRINTF(3, 4);
+int    vsprintf  (char *str, const char *format, va_list ap) KLIB_PRINTF(2, 0);
+int    vsnprintf (char *str, size_t size, const char *format, va_list ap) KLIB_PRINTF(3, 0);
 
 // assert.h
 #ifdef NDEBUG
