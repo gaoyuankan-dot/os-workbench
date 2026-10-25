@@ -35,7 +35,7 @@ static int W, H;
 static uint32_t row_buf[MAX_W];
 static int cell_sz, org_x, org_y;
 static const int DX[4] = {0, 1, 0, -1};
-static const int DY[4] = {0, 1, 0, -1};
+static const int DY[4] = {-1, 0, 1, 0};
 
 // The trailing comma matters: AM_KEYS pastes KEYNAME(k) entries side by side
 // with no separator, so the comma has to come from KEYNAME itself.
