@@ -10,10 +10,13 @@
 #define MARGIN 0x303030
 #define BLACK  0x000000
 #define HEAD   0xffa500
+#define BODY   0x80ff80
 
-#define COLS   32
-#define ROWS   24
-#define PERIOD 6
+#define COLS      32
+#define ROWS      24
+#define START_LEN 5
+#define MAX_LEN   (COLS * ROWS)
+#define PERIOD    6
 
 typedef struct {
     // column, row
@@ -25,7 +28,10 @@ typedef enum {
 } Dir;
 
 typedef struct {
-    Cell head;
+    Cell body[MAX_LEN];
+    int tail;
+    int len;
+    int grow;
     Dir dir;
     int timer;
 } Game;
@@ -59,6 +65,22 @@ static int key_to_dir(int key) {
     default:
         return -1;
     }
+}
+
+static Cell head_cell(const Game* g) {
+    return g->body[(g->tail + g->len -1) % MAX_LEN];
+}
+
+static void push_head(Game* g, Cell c) {
+    g->body[(g->tail + g->len) % MAX_LEN] = c;
+    g->len++;
+}
+
+static Cell pop_tail(Game* g) {
+    Cell c = g->body[g->tail];
+    g->tail = (g->tail + 1) % MAX_LEN;
+    g->len--;
+    return c;
 }
 
 static void frame_sync(void) {
@@ -107,19 +129,27 @@ static void draw_board(void) {
 }
 
 static void new_game(Game* g) {
-    g->head  = (Cell){COLS / 4, ROWS / 2};
+    memset(g, 0, sizeof(*g));
     g->dir   = DIR_RIGHT;
-    g->timer = 0;
+    g->grow = START_LEN - 1;
     draw_board();
-    draw_cell(g->head, HEAD);
+    Cell start = {COLS / 4, ROWS / 2};
+    push_head(g, start);
+    draw_cell(head_cell(g), HEAD);
     frame_sync();
 }
 
 static void snake_step(Game* g) {
-    draw_cell(g->head, BLACK);
-    g->head.x = (g->head.x + DX[g->dir] + COLS) % COLS;
-    g->head.y = (g->head.y + DY[g->dir] + ROWS) % ROWS;
-    draw_cell(g->head, HEAD);
+    Cell head = head_cell(g);
+    Cell next = {(head.x + DX[g->dir] + COLS) % COLS,
+    (head.y + DY[g->dir] + ROWS) % ROWS};
+    draw_cell(head, BODY);
+    if (g->grow > 0)
+        g->grow--;
+    else
+        draw_cell(pop_tail(g), BLACK);
+    push_head(g, next);
+    draw_cell(next, HEAD);
 }
 
 static void update(Game* g) {
@@ -130,11 +160,10 @@ static void update(Game* g) {
 }
 
 static void on_key(Game* g, int key) {
-    (void)g;
     if(key == AM_KEY_ESCAPE)
         halt(0);
     int d = key_to_dir(key);
-    if (d >= 0)
+    if (d >= 0 && (d + 2) % 4 != g->dir)
         g->dir = d;
 }
 
