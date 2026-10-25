@@ -16,11 +16,17 @@
 #define PERIOD 6
 
 typedef struct {
+    // column, row
     int x, y;
 } Cell;
 
+typedef enum {
+    DIR_UP, DIR_RIGHT, DIR_DOWN, DIR_LEFT
+} Dir;
+
 typedef struct {
     Cell head;
+    Dir dir;
     int timer;
 } Game;
 static Game game;
@@ -28,6 +34,8 @@ static Game game;
 static int W, H;
 static uint32_t row_buf[MAX_W];
 static int cell_sz, org_x, org_y;
+static const int DX[4] = {0, 1, 0, -1};
+static const int DY[4] = {0, 1, 0, -1};
 
 // The trailing comma matters: AM_KEYS pastes KEYNAME(k) entries side by side
 // with no separator, so the comma has to come from KEYNAME itself.
@@ -35,6 +43,22 @@ static int cell_sz, org_x, org_y;
 static const char* key_names[] = {[AM_KEY_NONE] = "NONE", AM_KEYS(KEYNAME)};
 static const char* key_name(int code) {
     return (code >= 0 && code < (int)LENGTH(key_names)) ? key_names[code] : "?";
+}
+
+static int key_to_dir(int key) {
+    switch(key) {
+    case AM_KEY_UP: case AM_KEY_W:
+        return DIR_UP;
+
+    case AM_KEY_RIGHT: case AM_KEY_D:
+        return DIR_RIGHT;
+    case AM_KEY_DOWN: case AM_KEY_S:
+        return DIR_DOWN;
+    case AM_KEY_LEFT: case AM_KEY_A:
+        return DIR_LEFT;
+    default:
+        return -1;
+    }
 }
 
 static void frame_sync(void) {
@@ -83,8 +107,9 @@ static void draw_board(void) {
 }
 
 static void new_game(Game* g) {
+    g->head  = (Cell){COLS / 4, ROWS / 2};
+    g->dir   = DIR_RIGHT;
     g->timer = 0;
-    g->head = (Cell) { COLS / 4, ROWS / 2};
     draw_board();
     draw_cell(g->head, HEAD);
     frame_sync();
@@ -92,7 +117,8 @@ static void new_game(Game* g) {
 
 static void snake_step(Game* g) {
     draw_cell(g->head, BLACK);
-    g->head.x = (g->head.x + 1) % COLS;
+    g->head.x = (g->head.x + DX[g->dir] + COLS) % COLS;
+    g->head.y = (g->head.y + DY[g->dir] + ROWS) % ROWS;
     draw_cell(g->head, HEAD);
 }
 
@@ -107,6 +133,9 @@ static void on_key(Game* g, int key) {
     (void)g;
     if(key == AM_KEY_ESCAPE)
         halt(0);
+    int d = key_to_dir(key);
+    if (d >= 0)
+        g->dir = d;
 }
 
 // Operating system is a C program!
