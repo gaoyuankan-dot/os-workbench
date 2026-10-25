@@ -72,7 +72,7 @@ static void grid_init() {
 }
 
 static void draw_cell(Cell c, uint32_t color) {
-    int gap = cell_sz;
+    int gap = cell_sz >= 6 ? 1 : 0;
     fill_rect(org_x + c.x * cell_sz, org_y + c.y * cell_sz, cell_sz - gap,
               cell_sz - gap, color);
 }
