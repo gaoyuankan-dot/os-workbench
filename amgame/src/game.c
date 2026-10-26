@@ -8,7 +8,8 @@
 #define MAX_W    2048
 
 #define MARGIN 0x303030
-#define BLACK  0x000000
+#define BOARD  0x000000
+#define DEAD   0x606060
 #define HEAD   0xffa500
 #define BODY   0x80ff80
 
@@ -17,6 +18,11 @@
 #define START_LEN 5
 #define MAX_LEN   (COLS * ROWS)
 #define PERIOD    6
+
+
+typedef enum {
+    PLAYING, GAME_OVER
+} State;
 
 typedef struct {
     // column, row
@@ -28,11 +34,14 @@ typedef enum {
 } Dir;
 
 typedef struct {
+    State state;
     Cell body[MAX_LEN];
+    bool occupied[ROWS][COLS];
     int tail;
     int len;
     int grow;
     Dir dir;
+    Dir next_dir;
     int timer;
 } Game;
 static Game game;
@@ -67,19 +76,47 @@ static int key_to_dir(int key) {
     }
 }
 
+static bool is_reverse(Dir a, Dir b) {
+    return (a + 2) % 4 == b;
+}
+
+static void on_key(Game* g, int key) {
+    if(key == AM_KEY_ESCAPE)
+        halt(0);
+    if(g->state == GAME_OVER)
+        return;
+    int d = key_to_dir(key);
+    if (d >= 0 && !is_reverse(d, g->dir))
+        g->next_dir = d;
+}
+
 static Cell head_cell(const Game* g) {
     return g->body[(g->tail + g->len -1) % MAX_LEN];
+}
+
+static bool same_cell(Cell a, Cell b) {
+    return a.x == b.x && a.y == b.y;
+}
+
+static bool in_board(Cell c) {
+    return c.x >= 0 && c.x <= COLS && c.y >= 0 && c.y <= ROWS;
+}
+
+static bool in_body(Game* g, Cell next){
+    return g->occupied[next.y][next.x] && (g->grow > 0 || !same_cell(next, g->body[g->tail]));
 }
 
 static void push_head(Game* g, Cell c) {
     g->body[(g->tail + g->len) % MAX_LEN] = c;
     g->len++;
+    g->occupied[c.x][c.y] = true;
 }
 
 static Cell pop_tail(Game* g) {
     Cell c = g->body[g->tail];
     g->tail = (g->tail + 1) % MAX_LEN;
     g->len--;
+    g->occupied[c.x][c.y] = false;
     return c;
 }
 
@@ -125,13 +162,14 @@ static void draw_cell(Cell c, uint32_t color) {
 
 static void draw_board(void) {
     fill_rect(0, 0, W, H, MARGIN);
-    fill_rect(org_x, org_y, COLS * cell_sz, ROWS * cell_sz, BLACK);
+    fill_rect(org_x, org_y, COLS * cell_sz, ROWS * cell_sz, BOARD);
 }
 
 static void new_game(Game* g) {
     memset(g, 0, sizeof(*g));
-    g->dir   = DIR_RIGHT;
+    g->state = PLAYING;
     g->grow = START_LEN - 1;
+    g->dir = g->next_dir = DIR_RIGHT;
     draw_board();
     Cell start = {COLS / 4, ROWS / 2};
     push_head(g, start);
@@ -139,32 +177,45 @@ static void new_game(Game* g) {
     frame_sync();
 }
 
+static void game_over(Game* g) {
+    g->state = GAME_OVER;
+    for(int i = 0; i < g->len; ++i) {
+        draw_cell(g->body[(g->tail + i) % MAX_LEN], DEAD);
+    }
+    printf("Game Over. Press any key to restart or ESC to quit");
+}
+
 static void snake_step(Game* g) {
+    g->dir = g->next_dir;
     Cell head = head_cell(g);
-    Cell next = {(head.x + DX[g->dir] + COLS) % COLS,
-    (head.y + DY[g->dir] + ROWS) % ROWS};
+    /* Cross the boundary */
+    //Cell next = {(head.x + DX[g->dir] + COLS) % COLS,
+    //(head.y + DY[g->dir] + ROWS) % ROWS};
+    Cell next = {head.x + DX[g->dir], head.y + DY[g->dir]};
+
+    if(!in_board(next) || in_body(g, next)) {
+        game_over(g);
+        return;
+    }
+
     draw_cell(head, BODY);
     if (g->grow > 0)
         g->grow--;
     else
-        draw_cell(pop_tail(g), BLACK);
+        draw_cell(pop_tail(g), BOARD);
+
     push_head(g, next);
     draw_cell(next, HEAD);
+
 }
 
 static void update(Game* g) {
+    if(g->state == GAME_OVER)
+        return;
     if(++g->timer < PERIOD)
         return;
     g->timer = 0;
     snake_step(g);
-}
-
-static void on_key(Game* g, int key) {
-    if(key == AM_KEY_ESCAPE)
-        halt(0);
-    int d = key_to_dir(key);
-    if (d >= 0 && (d + 2) % 4 != g->dir)
-        g->dir = d;
 }
 
 // Operating system is a C program!
