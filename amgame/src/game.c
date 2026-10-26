@@ -20,22 +20,18 @@
 #define MAX_LEN   (COLS * ROWS)
 #define PERIOD    6
 
-
-typedef enum {
-    PLAYING, GAME_OVER
-} State;
+typedef enum { TITLE, PLAYING, GAME_OVER } State;
 
 typedef struct {
     // column, row. Not pixels
     int x, y;
 } Cell;
 
-typedef enum {
-    DIR_UP, DIR_RIGHT, DIR_DOWN, DIR_LEFT
-} Dir;
+typedef enum { DIR_UP, DIR_RIGHT, DIR_DOWN, DIR_LEFT } Dir;
 
 typedef struct {
     State state;
+    int frames_in_state;
     Cell body[MAX_LEN];
     bool occupied[ROWS][COLS];
     int tail;
@@ -63,36 +59,6 @@ static const char* key_name(int code) {
     return (code >= 0 && code < (int)LENGTH(key_names)) ? key_names[code] : "?";
 }
 
-static int key_to_dir(int key) {
-    switch(key) {
-    case AM_KEY_UP: case AM_KEY_W:
-        return DIR_UP;
-
-    case AM_KEY_RIGHT: case AM_KEY_D:
-        return DIR_RIGHT;
-    case AM_KEY_DOWN: case AM_KEY_S:
-        return DIR_DOWN;
-    case AM_KEY_LEFT: case AM_KEY_A:
-        return DIR_LEFT;
-    default:
-        return -1;
-    }
-}
-
-static bool is_reverse(Dir a, Dir b) {
-    return (a + 2) % 4 == b;
-}
-
-static void on_key(Game* g, int key) {
-    if(key == AM_KEY_ESCAPE)
-        halt(0);
-    if(g->state == GAME_OVER)
-        return;
-    int d = key_to_dir(key);
-    if (d >= 0 && !is_reverse(d, g->dir))
-        g->next_dir = d;
-}
-
 static void frame_sync(void) {
     io_write(AM_GPU_FBDRAW, 0, 0, NULL, 0, 0, true);
 }
@@ -104,7 +70,6 @@ static void fill_rect(int x, int y, int w, int h, uint32_t color) {
         x = 0;
     }
     if (y < 0) {
-
         h += y;
         y = 0;
     }
@@ -121,8 +86,7 @@ static void fill_rect(int x, int y, int w, int h, uint32_t color) {
 
 static void grid_init() {
     cell_sz = (W / COLS < H / ROWS) ? W / COLS : H / ROWS;
-    if (cell_sz < 2)
-        cell_sz = 2;
+    if (cell_sz < 2) cell_sz = 2;
     org_x = (W - cell_sz * COLS) / 2;
     org_y = (H - cell_sz * ROWS) / 2;
 }
@@ -130,7 +94,7 @@ static void grid_init() {
 static void draw_cell(Cell c, uint32_t color) {
     int gap = cell_sz >= 6 ? 1 : 0;
     fill_rect(org_x + c.x * cell_sz, org_y + c.y * cell_sz, cell_sz - gap,
-              cell_sz - gap, color);
+            cell_sz - gap, color);
 }
 
 static void draw_board(void) {
@@ -139,7 +103,7 @@ static void draw_board(void) {
 }
 
 static Cell head_cell(const Game* g) {
-    return g->body[(g->tail + g->len -1) % MAX_LEN];
+    return g->body[(g->tail + g->len - 1) % MAX_LEN];
 }
 
 static bool same_cell(Cell a, Cell b) {
@@ -148,10 +112,6 @@ static bool same_cell(Cell a, Cell b) {
 
 static bool in_board(Cell c) {
     return c.x >= 0 && c.x < COLS && c.y >= 0 && c.y < ROWS;
-}
-
-static bool in_body(Game* g, Cell next){
-    return g->occupied[next.y][next.x] && (g->grow > 0 || !same_cell(next, g->body[g->tail]));
 }
 
 static void push_head(Game* g, Cell c) {
@@ -163,7 +123,7 @@ static void push_head(Game* g, Cell c) {
 }
 
 static Cell pop_tail(Game* g) {
-    Cell c = g->body[g->tail];
+    Cell c  = g->body[g->tail];
     g->tail = (g->tail + 1) % MAX_LEN;
     g->len--;
     g->occupied[c.y][c.x] = false;
@@ -172,16 +132,15 @@ static Cell pop_tail(Game* g) {
 
 static bool place_food(Game* g) {
     int free_cells = MAX_LEN - g->len;
-    if(free_cells == 0)
-        return false;
+    if (free_cells == 0) return false;
 
-    int k = rand() % free_cells;
-    int row =  k / COLS, col = k % COLS;
-    while(g->occupied[row][col]) {
+    int k   = rand() % free_cells;
+    int row = k / COLS, col = k % COLS;
+    while (g->occupied[row][col]) {
         k++;
-        if(k == free_cells)
-            k = k % free_cells;
-        row = k / COLS; col = k % COLS;
+        if (k == free_cells) k = k % free_cells;
+        row = k / COLS;
+        col = k % COLS;
     }
 
     g->food = (Cell){col, row};
@@ -192,7 +151,7 @@ static bool place_food(Game* g) {
 static void new_game(Game* g) {
     memset(g, 0, sizeof(*g));
     g->state = PLAYING;
-    g->grow = START_LEN - 1;
+    g->grow  = START_LEN - 1;
     g->dir = g->next_dir = DIR_RIGHT;
     srand((unsigned)io_read(AM_TIMER_UPTIME).us);
     draw_board();
@@ -203,24 +162,89 @@ static void new_game(Game* g) {
 }
 
 static void game_over(Game* g) {
-    g->state = GAME_OVER;
-    for(int i = 0; i < g->len; ++i) {
+    for (int i = 0; i < g->len; ++i) {
         draw_cell(g->body[(g->tail + i) % MAX_LEN], DEAD);
     }
     printf("Score: %d\n", g->score);
     printf("Game Over. Press any key to restart or ESC to quit\n");
 }
 
+static void enter(Game* g, State s) {
+    switch(s) {
+    case TITLE:
+        draw_board();
+        draw_cell((Cell){COLS / 4, ROWS / 2}, HEAD);
+        printf("SNAKE: arrow_keys/WASD steer, ESC quits\n. "
+               "Press any key to start\n");
+        break;
+    case PLAYING:
+        new_game(g);
+        break;
+    case GAME_OVER:
+        game_over(g);
+    }
+    g->state = s;
+    g->frames_in_state = 0;
+}
+
+static int key_to_dir(int key) {
+    switch (key) {
+        case AM_KEY_UP:
+        case AM_KEY_W:
+            return DIR_UP;
+
+        case AM_KEY_RIGHT:
+        case AM_KEY_D:
+            return DIR_RIGHT;
+        case AM_KEY_DOWN:
+        case AM_KEY_S:
+            return DIR_DOWN;
+        case AM_KEY_LEFT:
+        case AM_KEY_A:
+            return DIR_LEFT;
+        default:
+            return -1;
+    }
+}
+
+static bool is_reverse(Dir a, Dir b) {
+    return (a + 2) % 4 == b;
+}
+
+static void on_key(Game* g, int key) {
+    if (key == AM_KEY_ESCAPE) halt(0);
+    switch (g->state) {
+    case TITLE:
+        enter(g, PLAYING);
+        break;
+    case PLAYING: {
+        int d = key_to_dir(key);
+        if (d >= 0 && !is_reverse(d, g->dir))
+            g->next_dir = d;
+        break;
+    }
+    case GAME_OVER:
+        if (g->frames_in_state > FPS/2)
+            enter(g, PLAYING);
+        break;
+    }
+}
+
+static bool in_body(Game* g, Cell next) {
+    return g->occupied[next.y][next.x] &&
+           (g->grow > 0 || !same_cell(next, g->body[g->tail]));
+}
+
 static void snake_step(Game* g) {
-    g->dir = g->next_dir;
+    g->dir    = g->next_dir;
     Cell head = head_cell(g);
     /* Cross the boundary */
-    //Cell next = {(head.x + DX[g->dir] + COLS) % COLS,
+    // Cell next = {(head.x + DX[g->dir] + COLS) % COLS,
     //(head.y + DY[g->dir] + ROWS) % ROWS};
     Cell next = {head.x + DX[g->dir], head.y + DY[g->dir]};
 
-    if(!in_board(next) || in_body(g, next)) {
-        game_over(g);
+    if (!in_board(next) || in_body(g, next)) {
+        enter(g, GAME_OVER);
         return;
     }
 
@@ -231,10 +255,10 @@ static void snake_step(Game* g) {
         draw_cell(pop_tail(g), BOARD);
     push_head(g, next);
 
-    if(same_cell(next, g->food)) {
+    if (same_cell(next, g->food)) {
         g->score++;
         g->grow++;
-        if(!place_food(g)) {
+        if (!place_food(g)) {
             printf("Impossible\n");
             game_over(g);
         }
@@ -242,9 +266,11 @@ static void snake_step(Game* g) {
 }
 
 static void update(Game* g) {
-    if(g->state == GAME_OVER)
+    if (g->frames_in_state <= FPS/2)
+        g->frames_in_state++;
+    if (g->state != PLAYING)
         return;
-    if(++g->timer < PERIOD)
+    if (++g->timer < PERIOD)
         return;
     g->timer = 0;
     snake_step(g);
@@ -257,11 +283,10 @@ int main(const char* args) {
     AM_GPU_CONFIG_T gpu = io_read(AM_GPU_CONFIG);
     W                   = gpu.width < MAX_W ? gpu.width : MAX_W;
     H                   = gpu.height;
+    grid_init();
 
     printf("mainargs=\"%s\" screen=%dx%d\n", args, W, H);  // make run mainargs=xxx
-
-    grid_init();
-    new_game(&game);
+    enter(&game, TITLE);
 
     uint32_t frames = 0;
     uint64_t next = io_read(AM_TIMER_UPTIME).us, fps_t0 = next;
@@ -271,7 +296,8 @@ int main(const char* args) {
         while ((now = io_read(AM_TIMER_UPTIME).us) < next)
             ;
         next += FRAME_US;
-        if (now > next + 10 * FRAME_US) next = now + FRAME_US;
+        if (now > next + 10 * FRAME_US)
+            next = now + FRAME_US;
 
         for (int n = 0; n < 64; ++n) {
             AM_INPUT_KEYBRD_T ev = io_read(AM_INPUT_KEYBRD);
@@ -285,7 +311,6 @@ int main(const char* args) {
 
         update(&game);
         frame_sync();
-
 
         frames++;
         if (now - fps_t0 >= 1000000) {
