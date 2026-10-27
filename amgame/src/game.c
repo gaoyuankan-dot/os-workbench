@@ -9,16 +9,20 @@
 
 #define MARGIN 0x303030
 #define BOARD  0x000000
-#define DEAD   0x606060
-#define FOOD   0xff4040
 #define HEAD   0xffa500
 #define BODY   0x80ff80
+#define DEAD   0x606060
+#define FOOD   0xff4040
+#define SCORE  0xffffff
 
-#define COLS      32
-#define ROWS      24
-#define START_LEN 5
-#define MAX_LEN   (COLS * ROWS)
-#define PERIOD    6
+#define COLS            32
+#define ROWS            24
+#define MAX_LEN         (COLS * ROWS)
+#define START_LEN       5
+#define START_PERIOD    6
+#define MIN_PERIOD      2
+#define FOODS_PER_LEVEL 5
+#define DEBOUNCE        (FPS / 2)
 
 typedef enum { TITLE, PLAYING, GAME_OVER } State;
 
@@ -40,6 +44,7 @@ typedef struct {
     Dir dir;
     Dir next_dir;
     int timer;
+    int period;
     Cell food;
     int score;
 } Game;
@@ -102,6 +107,44 @@ static void draw_board(void) {
     fill_rect(org_x, org_y, COLS * cell_sz, ROWS * cell_sz, BOARD);
 }
 
+static const uint8_t FONT[10][5] = {
+    {7, 5, 5, 5, 7},  // 0
+    {2, 6, 2, 2, 7},  // 1
+    {7, 1, 7, 4, 7},  // 2
+    {7, 1, 7, 1, 7},  // 3
+    {5, 5, 7, 1, 1},  // 4
+    {7, 4, 7, 1, 7},  // 5
+    {7, 4, 7, 5, 7},  // 6
+    {7, 1, 1, 1, 1},  // 7
+    {7, 5, 7, 5, 7},  // 8
+    {7, 5, 7, 1, 7},  // 9
+};
+
+static void drwa_number(int n, uint32_t color) {
+    if (n < 0)
+        n = 0;
+
+    int digits[10] = {0}, count = 0;
+    while(n) {
+        digits[count++] = n % 10;
+        n /= 10;
+    }
+
+    int width = count * 4 - 1;
+    int x0 = (COLS - width) / 2, y0 = (ROWS - 5) / 2;
+    fill_rect(org_x + (x0 - 1) * cell_sz, org_y + (y0 - 1) * cell_sz,
+              (width + 2) * cell_sz, 7 * cell_sz, BOARD);
+    for (int i = 0; i < count; ++i) {
+        int d = digits[count -1 - i];
+        for (int row = 0; row < 5; ++row) {
+            for (int col = 0; col < 3; ++ col)
+                if (FONT[d][row] & (4 >> col))
+                    draw_cell((Cell){x0 + i * 4 + col, y0 + row}, color);
+        }
+    }
+}
+
+
 static Cell head_cell(const Game* g) {
     return g->body[(g->tail + g->len - 1) % MAX_LEN];
 }
@@ -153,6 +196,7 @@ static void new_game(Game* g) {
     g->state = PLAYING;
     g->grow  = START_LEN - 1;
     g->dir = g->next_dir = DIR_RIGHT;
+    g->period = START_PERIOD;
     srand((unsigned)io_read(AM_TIMER_UPTIME).us);
     draw_board();
     Cell start = {COLS / 4, ROWS / 2};
@@ -165,7 +209,8 @@ static void game_over(Game* g) {
     for (int i = 0; i < g->len; ++i) {
         draw_cell(g->body[(g->tail + i) % MAX_LEN], DEAD);
     }
-    printf("Score: %d\n", g->score);
+    //printf("Score: %d\n", g->score);
+    drwa_number(g->score, SCORE);
     printf("Game Over. Press any key to restart or ESC to quit\n");
 }
 
@@ -258,19 +303,21 @@ static void snake_step(Game* g) {
     if (same_cell(next, g->food)) {
         g->score++;
         g->grow++;
+        int period = START_PERIOD - g->score / FOODS_PER_LEVEL;
+        g->period = period > MIN_PERIOD ? period : MIN_PERIOD;
         if (!place_food(g)) {
             printf("Impossible\n");
-            game_over(g);
+            enter(g, GAME_OVER);
         }
     }
 }
 
 static void update(Game* g) {
-    if (g->frames_in_state <= FPS/2)
+    if (g->frames_in_state <= DEBOUNCE)
         g->frames_in_state++;
     if (g->state != PLAYING)
         return;
-    if (++g->timer < PERIOD)
+    if (++g->timer < g->period)
         return;
     g->timer = 0;
     snake_step(g);
