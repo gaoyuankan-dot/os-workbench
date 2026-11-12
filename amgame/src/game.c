@@ -120,15 +120,15 @@ static const uint8_t FONT[10][5] = {
     {7, 5, 7, 1, 7},  // 9
 };
 
-static void drwa_number(int n, uint32_t color) {
+static void draw_number(int n, uint32_t color) {
     if (n < 0)
         n = 0;
 
     int digits[10] = {0}, count = 0;
-    while(n) {
+    do {
         digits[count++] = n % 10;
         n /= 10;
-    }
+    } while(n);
 
     int width = count * 4 - 1;
     int x0 = (COLS - width) / 2, y0 = (ROWS - 5) / 2;
@@ -177,18 +177,21 @@ static bool place_food(Game* g) {
     int free_cells = MAX_LEN - g->len;
     if (free_cells == 0) return false;
 
-    int k   = rand() % free_cells;
-    int row = k / COLS, col = k % COLS;
-    while (g->occupied[row][col]) {
-        k++;
-        if (k == free_cells) k = k % free_cells;
-        row = k / COLS;
-        col = k % COLS;
-    }
+    int k = rand() % free_cells;
 
-    g->food = (Cell){col, row};
-    draw_cell(g->food, FOOD);
-    return true;
+    for (int row = 0; row < ROWS; ++row) {
+        for (int col = 0; col < COLS; ++col) {
+            if (g->occupied[row][col])
+                continue;
+            if (k == 0) {
+                g->food = (Cell) {col, row};
+                draw_cell(g->food, FOOD);
+                return true;
+            }
+            k--;
+        }
+    }
+    return false;
 }
 
 static void new_game(Game* g) {
@@ -210,7 +213,7 @@ static void game_over(Game* g) {
         draw_cell(g->body[(g->tail + i) % MAX_LEN], DEAD);
     }
     //printf("Score: %d\n", g->score);
-    drwa_number(g->score, SCORE);
+    draw_number(g->score, SCORE);
     printf("Game Over. Press any key to restart or ESC to quit\n");
 }
 
@@ -269,7 +272,7 @@ static void on_key(Game* g, int key) {
         break;
     }
     case GAME_OVER:
-        if (g->frames_in_state > FPS/2)
+        if (g->frames_in_state > DEBOUNCE)
             enter(g, PLAYING);
         break;
     }
